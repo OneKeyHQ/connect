@@ -1,0 +1,66 @@
+name: dev-deploy-test
+
+on:
+  push:
+    branches:
+      - master
+      - onekey
+  pull_request:
+    branches:
+      - master
+      - onekey
+
+jobs:
+  dev-deploy-test:
+    runs-on: ubuntu-latest
+    env:
+      TEST_ENDPOINT: connect.test.onekey.so
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Node
+        uses: actions/setup-node@v1
+        with:
+          registry-url: 'https://npm.pkg.github.com'
+          always-auth: true
+          scope: '@onekeyhq'
+          node-version: '14.x'
+      - name: Install Dependiences
+        run: |
+          npm install -g yarn
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+      - uses: actions/cache@v2
+        id: yarn-cache
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+      - name: Build Target
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI: false
+        run: |
+          yarn && yarn build
+      - name: Deploy Github Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build
+          cname: ${{ env.TEST_ENDPOINT }}
+          force_orphan: true
+      - name: Comment on PR
+        uses: actions/github-script@v3
+        if: ${{ !(github.ref == 'refs/heads/master' || github.ref == 'refs/heads/onekey') }}
+        env:
+          SHA: ${{ github.sha }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `👋 Successfully deployed the latest commit \`${process.env.SHA}\` to https://${process.env.TEST_ENDPOINT}`
+            })
